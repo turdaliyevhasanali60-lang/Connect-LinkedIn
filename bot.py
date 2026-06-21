@@ -742,6 +742,14 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    import fcntl, sys
+    lock_file = open("/tmp/linkedin_bot.lock", "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.error("Another bot instance is already running. Exiting.")
+        sys.exit(1)
+
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     conv = ConversationHandler(
