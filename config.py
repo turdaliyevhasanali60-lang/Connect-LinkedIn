@@ -1,4 +1,7 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()  # loads .env from the working directory (Connect-LinkedIn/)
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
