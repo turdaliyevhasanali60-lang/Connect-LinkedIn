@@ -17,7 +17,7 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-v4-flash"  # not the deepseek-chat alias — that's deprecated 2026-07-24
 
-ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
+ANTHROPIC_MODEL = "claude-sonnet-4-6"
 
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "claude")
 
