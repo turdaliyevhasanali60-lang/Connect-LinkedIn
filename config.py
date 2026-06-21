@@ -8,7 +8,7 @@ if _env_path.exists():
         _line = _line.strip()
         if _line and not _line.startswith("#") and "=" in _line:
             _k, _, _v = _line.partition("=")
-            os.environ.setdefault(_k.strip(), _v.strip())
+            os.environ[_k.strip()] = _v.strip()
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
