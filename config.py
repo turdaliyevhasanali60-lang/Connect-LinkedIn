@@ -1,7 +1,14 @@
 import os
-from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()  # loads .env from the working directory (Connect-LinkedIn/)
+# Pure-Python .env loader — no external library required
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    for _line in _env_path.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _, _v = _line.partition("=")
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
