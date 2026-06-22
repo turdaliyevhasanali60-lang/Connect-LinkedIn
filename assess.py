@@ -13,8 +13,6 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-LANG_NAMES = {"uz": "Uzbek", "ru": "Russian", "en": "English"}
-
 # Rubric and scoring mappings
 PHOTO_SCORES = {
     "professional": (3, "Professional headshot (smiling, clean background, shoulders up)"),
@@ -42,7 +40,9 @@ EDUCATION_SCORES = {
 OPEN_TO_WORK_SCORES = {
     "recruiters_only": (8, "Open to Work visible to recruiters only"),
     "all_linkedin": (5, "Open to Work visible to all LinkedIn members"),
-    "not_looking": (0, "Open to Work is OFF or not set"),
+    "employed": (8, "Currently employed — Open to Work not applicable (full points)"),
+    "off": (0, "Open to Work is OFF — not enabled despite actively job seeking"),
+    "not_looking": (0, "Open to Work is OFF or not set"),  # legacy key
 }
 SKILLS_COUNT_SCORES = {
     "over_50": (10, "50+ skills listed on profile"),
@@ -53,6 +53,11 @@ SKILLS_COUNT_SCORES = {
 
 P2_SCORES = {"0_10": (1, "0–10 connections"), "under_100": (3, "Under 100 connections"), "100_500": (8, "100–500 connections"), "500_plus": (15, "500+ connections")}
 P3_SCORES = {"never": (0, "Never posted on LinkedIn"), "over_month": (2, "Posted over a month ago"), "this_month": (6, "Posted this month"), "this_week": (10, "Posted this week")}
+
+
+def _esc(text: str) -> str:
+    """Escape curly braces in user text before str.format() insertion."""
+    return text.replace("{", "{{").replace("}", "}}")
 
 SYSTEM_PROMPT_PDF = """You are a LinkedIn Profile Expert trained on the methodology of Shavkat Karimov (ex-Head of SEO at Microsoft, ex-VP of SEO at BOLD, ~50k LinkedIn followers) from his "Connect!" and "Ghost or Hired" frameworks.
 
@@ -463,7 +468,7 @@ Why: [1 sentence]
 
 
 
-async def assess_profile(user_data: dict, lang: str):
+async def assess_profile(user_data: dict):
     """Asynchronously calls the LLM provider and yields text chunks as they arrive (streaming).
     Adapts prompt based on whether user uploaded a PDF or pasted Headline/About text."""
     photo_choice = user_data.get("photo", "none")
@@ -473,7 +478,6 @@ async def assess_profile(user_data: dict, lang: str):
     edu_choice = user_data.get("education", "none")
     conn_choice = user_data.get("connections", "under_100")
     post_choice = user_data.get("posting", "over_month")
-    name = user_data.get("name", "there")
 
     photo_score, photo_desc = PHOTO_SCORES.get(photo_choice, (0, "No profile photo or default avatar"))
     banner_score, banner_desc = BANNER_SCORES.get(banner_choice, (0, "Default LinkedIn background or generic image"))
@@ -487,12 +491,11 @@ async def assess_profile(user_data: dict, lang: str):
     conn_score, conn_desc = P2_SCORES.get(conn_choice, (3, "Under 100 connections"))
     post_score, post_desc = P3_SCORES.get(post_choice, (2, "Posted over a month ago"))
 
-    skills_text = user_data.get("skills_text", "None provided")
+    skills_text = _esc(user_data.get("skills_text", "None provided"))
 
     # Select prompt based on path
     if "pdf_text" in user_data:
         system_prompt = SYSTEM_PROMPT_PDF.format(
-            name=name,
             photo_desc=photo_desc,
             photo_score=photo_score,
             banner_desc=banner_desc,
@@ -512,8 +515,8 @@ async def assess_profile(user_data: dict, lang: str):
         content_text = user_data["pdf_text"][:12000]
     else:
         system_prompt = SYSTEM_PROMPT_TEXT.format(
-            headline_text=user_data.get("headline_text", ""),
-            about_text=user_data.get("about_text", ""),
+            headline_text=_esc(user_data.get("headline_text", "")),
+            about_text=_esc(user_data.get("about_text", "")),
             photo_desc=photo_desc,
             photo_score=photo_score,
             banner_desc=banner_desc,
@@ -536,7 +539,7 @@ async def assess_profile(user_data: dict, lang: str):
         )
         content_text = f"Headline: {user_data.get('headline_text', '')}\nAbout: {user_data.get('about_text', '')}"
 
-    if LLM_PROVIDER == "claude":
+    if LLM_PROVIDER == "claude" or not DEEPSEEK_API_KEY:
         logger.info("Calling Anthropic Claude API (Streaming)...")
         async with httpx.AsyncClient(timeout=90) as client:
             async with client.stream(
@@ -584,6 +587,7 @@ async def assess_profile(user_data: dict, lang: str):
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": content_text},
                     ],
+                    "max_tokens": 2000,
                     "temperature": 0.3,
                     "stream": True,
                 },

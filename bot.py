@@ -54,7 +54,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Welcome and ask for profile input."""
     context.user_data.clear()
     context.user_data["lang"] = "en"
-    target = update.message or update.callback_query.message
+    target = update.message or (update.callback_query and update.callback_query.message)
+    if not target:
+        return AWAITING_INPUT
     await target.reply_text(
         "👋 Welcome to the *Connect! LinkedIn Assessment Bot*.\n\n"
         "I'll score your profile against Shavkat Karimov's Connect! Tour framework.\n\n"
@@ -134,6 +136,15 @@ async def input_pdf_received(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return AWAITING_INPUT
 
+    if "linkedin" not in pdf_text.lower()[:1000]:
+        await update.message.reply_text(
+            "⚠️ This doesn't look like a LinkedIn PDF export.\n\n"
+            "On desktop: open your profile → *•••* → *Save to PDF*.\n\n"
+            "Or paste your *headline* as a text message instead.",
+            parse_mode="Markdown",
+        )
+        return AWAITING_INPUT
+
     context.user_data["pdf_text"] = pdf_text
     context.user_data["name"] = guess_name(pdf_text)
 
@@ -144,7 +155,7 @@ async def input_pdf_received(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [InlineKeyboardButton("❌ No Photo / Default Avatar", callback_data="btn_none")],
         [InlineKeyboardButton("⬅️ Go Back", callback_data="back_photo")],
     ])
-    photo_path = os.path.join(os.path.dirname(__file__), "profile_photo_examples.png")
+    photo_path = os.path.join(os.path.dirname(__file__), "Photo_example.jpeg")
     if os.path.exists(photo_path):
         with open(photo_path, "rb") as f:
             await update.message.reply_photo(
@@ -179,7 +190,7 @@ async def about_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         [InlineKeyboardButton("❌ No Photo / Default Avatar", callback_data="btn_none")],
         [InlineKeyboardButton("⬅️ Go Back", callback_data="back_photo")],
     ])
-    photo_path = os.path.join(os.path.dirname(__file__), "profile_photo_examples.png")
+    photo_path = os.path.join(os.path.dirname(__file__), "Photo_example.jpeg")
     if os.path.exists(photo_path):
         with open(photo_path, "rb") as f:
             await update.message.reply_photo(
@@ -262,8 +273,8 @@ async def url_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🟢 Recruiters only", callback_data="btn_recruiters_only")],
             [InlineKeyboardButton("🟢 All LinkedIn members (Green badge)", callback_data="btn_all_linkedin")],
-            [InlineKeyboardButton("🏢 Currently employed / not job seeking", callback_data="btn_not_looking")],
-            [InlineKeyboardButton("❌ OFF / Not set", callback_data="btn_not_looking")],
+            [InlineKeyboardButton("🏢 Currently employed — not job seeking", callback_data="btn_employed")],
+            [InlineKeyboardButton("❌ OFF / Not set (actively job seeking)", callback_data="btn_off")],
             [InlineKeyboardButton("⬅️ Go Back", callback_data="back_otw")],
         ])
         await query.edit_message_text(
@@ -317,8 +328,8 @@ async def education_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🟢 Recruiters only", callback_data="btn_recruiters_only")],
         [InlineKeyboardButton("🟢 All LinkedIn members (Green badge)", callback_data="btn_all_linkedin")],
-        [InlineKeyboardButton("🏢 Currently employed / not job seeking", callback_data="btn_not_looking")],
-        [InlineKeyboardButton("❌ OFF / Not set", callback_data="btn_not_looking")],
+        [InlineKeyboardButton("🏢 Currently employed — not job seeking", callback_data="btn_employed")],
+        [InlineKeyboardButton("❌ OFF / Not set (actively job seeking)", callback_data="btn_off")],
         [InlineKeyboardButton("⬅️ Go Back", callback_data="back_otw")],
     ])
     await query.edit_message_text(
@@ -429,7 +440,7 @@ async def skills_received(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     last_update_time = time.time()
 
     try:
-        async for chunk in assess_profile(context.user_data, "en"):
+        async for chunk in assess_profile(context.user_data):
             full_text += chunk
             now = time.time()
             if now - last_update_time > 1.5 and len(full_text) > 10:
@@ -455,6 +466,17 @@ async def skills_received(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             pass
         return ConversationHandler.END
 
+    if not full_text.strip():
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message.message_id,
+                text="⚠️ The assessment returned empty. Please try /start again.",
+            )
+        except Exception:
+            pass
+        return ConversationHandler.END
+
     # Delete the streaming placeholder and send the final formatted report
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
@@ -470,6 +492,23 @@ async def skills_received(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
     return ConversationHandler.END
+
+
+# ── Nudge helpers ─────────────────────────────────────────────────────────────
+
+async def _buttons_only_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sent when a user types text while the bot is waiting for a button tap."""
+    await update.message.reply_text("👆 Please use the buttons above to continue.")
+
+
+async def _doc_in_about_path(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Sent when a user uploads a file while the bot is waiting for About text."""
+    await update.message.reply_text(
+        "Please paste your *About / Summary* as text here.\n\n"
+        "To start over with a PDF, send /start.",
+        parse_mode="Markdown",
+    )
+    return AWAITING_ABOUT
 
 
 # ── Navigation back handlers ──────────────────────────────────────────────────
@@ -546,7 +585,7 @@ async def back_to_previous(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             [InlineKeyboardButton("❌ No Photo / Default Avatar", callback_data="btn_none")],
             [InlineKeyboardButton("⬅️ Go Back", callback_data="back_photo")],
         ])
-        photo_path = os.path.join(os.path.dirname(__file__), "profile_photo_examples.png")
+        photo_path = os.path.join(os.path.dirname(__file__), "Photo_example.jpeg")
         if os.path.exists(photo_path):
             with open(photo_path, "rb") as f:
                 await context.bot.send_photo(
@@ -643,8 +682,8 @@ async def back_to_previous(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🟢 Recruiters only", callback_data="btn_recruiters_only")],
             [InlineKeyboardButton("🟢 All LinkedIn members (Green badge)", callback_data="btn_all_linkedin")],
-            [InlineKeyboardButton("🏢 Currently employed / not job seeking", callback_data="btn_not_looking")],
-            [InlineKeyboardButton("❌ OFF / Not set", callback_data="btn_not_looking")],
+            [InlineKeyboardButton("🏢 Currently employed — not job seeking", callback_data="btn_employed")],
+            [InlineKeyboardButton("❌ OFF / Not set (actively job seeking)", callback_data="btn_off")],
             [InlineKeyboardButton("⬅️ Go Back", callback_data="back_otw")],
         ])
         await query.edit_message_text(
@@ -764,43 +803,53 @@ def main() -> None:
             ],
             AWAITING_ABOUT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, about_received),
+                MessageHandler(filters.Document.ALL, _doc_in_about_path),
                 CallbackQueryHandler(back_to_input, pattern=r"^back_about$"),
             ],
             AWAITING_PHOTO: [
                 CallbackQueryHandler(photo_chosen, pattern=r"^btn_"),
                 CallbackQueryHandler(back_to_previous, pattern=r"^back_photo$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _buttons_only_nudge),
             ],
             AWAITING_BANNER: [
                 CallbackQueryHandler(banner_chosen, pattern=r"^btn_"),
                 CallbackQueryHandler(back_to_previous, pattern=r"^back_banner$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _buttons_only_nudge),
             ],
             AWAITING_URL: [
                 CallbackQueryHandler(url_chosen, pattern=r"^btn_"),
                 CallbackQueryHandler(back_to_previous, pattern=r"^back_url$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _buttons_only_nudge),
             ],
             AWAITING_EXPERIENCE: [
                 CallbackQueryHandler(experience_chosen, pattern=r"^btn_"),
                 CallbackQueryHandler(back_to_previous, pattern=r"^back_experience$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _buttons_only_nudge),
             ],
             AWAITING_EDUCATION: [
                 CallbackQueryHandler(education_chosen, pattern=r"^btn_"),
                 CallbackQueryHandler(back_to_previous, pattern=r"^back_education$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _buttons_only_nudge),
             ],
             AWAITING_OTW: [
                 CallbackQueryHandler(otw_chosen, pattern=r"^btn_"),
                 CallbackQueryHandler(back_to_previous, pattern=r"^back_otw$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _buttons_only_nudge),
             ],
             AWAITING_SKILLS_COUNT: [
                 CallbackQueryHandler(skills_count_chosen, pattern=r"^btn_"),
                 CallbackQueryHandler(back_to_previous, pattern=r"^back_skills_count$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _buttons_only_nudge),
             ],
             AWAITING_CONNECTIONS: [
                 CallbackQueryHandler(connections_chosen, pattern=r"^btn_"),
                 CallbackQueryHandler(back_to_previous, pattern=r"^back_connections$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _buttons_only_nudge),
             ],
             AWAITING_POSTING: [
                 CallbackQueryHandler(posting_chosen, pattern=r"^btn_"),
                 CallbackQueryHandler(back_to_previous, pattern=r"^back_posting$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _buttons_only_nudge),
             ],
             AWAITING_SKILLS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, skills_received),
