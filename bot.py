@@ -356,25 +356,21 @@ async def banner_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     await query.answer()
     context.user_data["banner"] = query.data.split("_", 1)[1]
 
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Clean URL (e.g. /in/yourname)", callback_data="btn_clean")],
         [InlineKeyboardButton("❌ Default URL (containing random digits)", callback_data="btn_default")],
         [InlineKeyboardButton("⬅️ Go Back", callback_data="back_url")],
     ])
-    try:
-        await query.edit_message_text(
-            "🔗 **Pillar 1: Custom URL**\n\n"
-            "Is your profile URL cleaned up?",
-            reply_markup=keyboard,
-            parse_mode="Markdown",
-        )
-    except Exception:
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="🔗 **Pillar 1: Custom URL**\n\nIs your profile URL cleaned up?",
-            reply_markup=keyboard,
-            parse_mode="Markdown",
-        )
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="🔗 **Pillar 1: Custom URL**\n\nIs your profile URL cleaned up?",
+        reply_markup=keyboard,
+        parse_mode="Markdown",
+    )
     return AWAITING_URL
 
 
@@ -445,6 +441,10 @@ async def otw_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await query.answer()
     context.user_data["otw"] = query.data.split("_", 1)[1]
 
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("50+ skills", callback_data="btn_over_50")],
         [InlineKeyboardButton("20–50 skills", callback_data="btn_20_to_50")],
@@ -452,9 +452,9 @@ async def otw_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         [InlineKeyboardButton("No skills listed", callback_data="btn_none")],
         [InlineKeyboardButton("⬅️ Go Back", callback_data="back_skills_count")],
     ])
-    await query.edit_message_text(
-        "💪 **Number of Skills**\n\n"
-        "How many skills do you have listed in your LinkedIn Profile's Skills section?",
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="💪 **Number of Skills**\n\nHow many skills do you have listed in your LinkedIn Profile's Skills section?",
         reply_markup=keyboard,
         parse_mode="Markdown",
     )
