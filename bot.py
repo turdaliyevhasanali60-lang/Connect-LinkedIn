@@ -86,6 +86,47 @@ def _welcome_text(ai_uses: int) -> str:
     )
 
 
+async def _send_welcome(bot, chat_id: int, ai_uses: int) -> None:
+    photo_path = os.path.join(os.path.dirname(__file__), "SavePDF.jpg")
+    if os.path.exists(photo_path):
+        with open(photo_path, "rb") as f:
+            await bot.send_photo(chat_id=chat_id, photo=f, caption=_welcome_text(ai_uses), parse_mode="Markdown")
+    else:
+        await bot.send_message(chat_id=chat_id, text=_welcome_text(ai_uses), parse_mode="Markdown")
+
+
+async def _send_banner_question(bot, chat_id: int) -> None:
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎨 Custom professional banner", callback_data="btn_custom")],
+        [InlineKeyboardButton("🌐 Default / generic banner", callback_data="btn_default")],
+        [InlineKeyboardButton("⬅️ Go Back", callback_data="back_banner")],
+    ])
+    photo_path = os.path.join(os.path.dirname(__file__), "bannerExample.jpg")
+    caption = "🖼️ **Pillar 1: Background Banner**\n\nWhat does your background banner look like?"
+    if os.path.exists(photo_path):
+        with open(photo_path, "rb") as f:
+            await bot.send_photo(chat_id=chat_id, photo=f, caption=caption, reply_markup=keyboard, parse_mode="Markdown")
+    else:
+        await bot.send_message(chat_id=chat_id, text=caption, reply_markup=keyboard, parse_mode="Markdown")
+
+
+async def _send_otw_question(bot, chat_id: int) -> None:
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🟢 Recruiters only", callback_data="btn_recruiters_only")],
+        [InlineKeyboardButton("🟢 All LinkedIn members (Green badge)", callback_data="btn_all_linkedin")],
+        [InlineKeyboardButton("🏢 Currently employed — not job seeking", callback_data="btn_employed")],
+        [InlineKeyboardButton("❌ OFF / Not set (actively job seeking)", callback_data="btn_off")],
+        [InlineKeyboardButton("⬅️ Go Back", callback_data="back_otw")],
+    ])
+    photo_path = os.path.join(os.path.dirname(__file__), "opentowork-linkedin.png")
+    caption = "💼 **Open to Work Status**\n\nWhat is your current Open to Work visibility?"
+    if os.path.exists(photo_path):
+        with open(photo_path, "rb") as f:
+            await bot.send_photo(chat_id=chat_id, photo=f, caption=caption, reply_markup=keyboard, parse_mode="Markdown")
+    else:
+        await bot.send_message(chat_id=chat_id, text=caption, reply_markup=keyboard, parse_mode="Markdown")
+
+
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 def _join_prompt() -> tuple:
@@ -123,7 +164,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     _clear_flow_data(context.user_data)
-    await target.reply_text(_welcome_text(ai_uses), parse_mode="Markdown")
+    await _send_welcome(context.bot, target.chat_id, ai_uses)
     return AWAITING_INPUT
 
 
@@ -150,7 +191,11 @@ async def check_membership_callback(update: Update, context: ContextTypes.DEFAUL
         return ConversationHandler.END
 
     _clear_flow_data(context.user_data)
-    await query.edit_message_text(_welcome_text(ai_uses), parse_mode="Markdown")
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    await _send_welcome(context.bot, query.message.chat_id, ai_uses)
     return AWAITING_INPUT
 
 
@@ -301,18 +346,7 @@ async def photo_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     except Exception:
         pass
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎨 Custom professional banner", callback_data="btn_custom")],
-        [InlineKeyboardButton("🌐 Default / generic banner", callback_data="btn_default")],
-        [InlineKeyboardButton("⬅️ Go Back", callback_data="back_banner")],
-    ])
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text="🖼️ **Pillar 1: Background Banner**\n\n"
-        "What is behind your profile photo?",
-        reply_markup=keyboard,
-        parse_mode="Markdown",
-    )
+    await _send_banner_question(context.bot, query.message.chat_id)
     return AWAITING_BANNER
 
 
@@ -350,19 +384,11 @@ async def url_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     if "pdf_text" in context.user_data:
         # Skip Experience and Education quiz in PDF path, go to OTW
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🟢 Recruiters only", callback_data="btn_recruiters_only")],
-            [InlineKeyboardButton("🟢 All LinkedIn members (Green badge)", callback_data="btn_all_linkedin")],
-            [InlineKeyboardButton("🏢 Currently employed — not job seeking", callback_data="btn_employed")],
-            [InlineKeyboardButton("❌ OFF / Not set (actively job seeking)", callback_data="btn_off")],
-            [InlineKeyboardButton("⬅️ Go Back", callback_data="back_otw")],
-        ])
-        await query.edit_message_text(
-            "💼 **Open to Work Status**\n\n"
-            "What is your current Open to Work visibility?",
-            reply_markup=keyboard,
-            parse_mode="Markdown",
-        )
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await _send_otw_question(context.bot, query.message.chat_id)
         return AWAITING_OTW
 
     keyboard = InlineKeyboardMarkup([
@@ -405,19 +431,11 @@ async def education_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.answer()
     context.user_data["education"] = query.data.split("_", 1)[1]
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🟢 Recruiters only", callback_data="btn_recruiters_only")],
-        [InlineKeyboardButton("🟢 All LinkedIn members (Green badge)", callback_data="btn_all_linkedin")],
-        [InlineKeyboardButton("🏢 Currently employed — not job seeking", callback_data="btn_employed")],
-        [InlineKeyboardButton("❌ OFF / Not set (actively job seeking)", callback_data="btn_off")],
-        [InlineKeyboardButton("⬅️ Go Back", callback_data="back_otw")],
-    ])
-    await query.edit_message_text(
-        "💼 **Open to Work Status**\n\n"
-        "What is your current Open to Work visibility?",
-        reply_markup=keyboard,
-        parse_mode="Markdown",
-    )
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    await _send_otw_question(context.bot, query.message.chat_id)
     return AWAITING_OTW
 
 
@@ -610,7 +628,11 @@ async def back_to_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     await query.answer()
     ai_uses = context.user_data.get("ai_uses", 0)
     _clear_flow_data(context.user_data)
-    await query.edit_message_text(_welcome_text(ai_uses), parse_mode="Markdown")
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    await _send_welcome(context.bot, query.message.chat_id, ai_uses)
     return AWAITING_INPUT
 
 
@@ -627,11 +649,7 @@ async def back_to_previous(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if "pdf_text" in context.user_data:
             ai_uses = context.user_data.get("ai_uses", 0)
             _clear_flow_data(context.user_data)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=_welcome_text(ai_uses),
-                parse_mode="Markdown",
-            )
+            await _send_welcome(context.bot, query.message.chat_id, ai_uses)
             return AWAITING_INPUT
         else:
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Go Back", callback_data="back_about")]])
@@ -674,17 +692,11 @@ async def back_to_previous(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return AWAITING_PHOTO
 
     elif cb_data == "back_url":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎨 Custom professional banner", callback_data="btn_custom")],
-            [InlineKeyboardButton("🌐 Default / generic banner", callback_data="btn_default")],
-            [InlineKeyboardButton("⬅️ Go Back", callback_data="back_banner")],
-        ])
-        await query.edit_message_text(
-            "🖼️ **Pillar 1: Background Banner**\n\n"
-            "What is behind your profile photo?",
-            reply_markup=keyboard,
-            parse_mode="Markdown",
-        )
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await _send_banner_question(context.bot, query.message.chat_id)
         return AWAITING_BANNER
 
     elif cb_data == "back_experience":
@@ -748,19 +760,11 @@ async def back_to_previous(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return AWAITING_EXPERIENCE
 
     elif cb_data == "back_skills_count":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🟢 Recruiters only", callback_data="btn_recruiters_only")],
-            [InlineKeyboardButton("🟢 All LinkedIn members (Green badge)", callback_data="btn_all_linkedin")],
-            [InlineKeyboardButton("🏢 Currently employed — not job seeking", callback_data="btn_employed")],
-            [InlineKeyboardButton("❌ OFF / Not set (actively job seeking)", callback_data="btn_off")],
-            [InlineKeyboardButton("⬅️ Go Back", callback_data="back_otw")],
-        ])
-        await query.edit_message_text(
-            "💼 **Open to Work Status**\n\n"
-            "What is your current Open to Work visibility?",
-            reply_markup=keyboard,
-            parse_mode="Markdown",
-        )
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await _send_otw_question(context.bot, query.message.chat_id)
         return AWAITING_OTW
 
     elif cb_data == "back_connections":
@@ -844,11 +848,7 @@ async def restart_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END
 
     _clear_flow_data(context.user_data)
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text=_welcome_text(ai_uses),
-        parse_mode="Markdown",
-    )
+    await _send_welcome(context.bot, query.message.chat_id, ai_uses)
     return AWAITING_INPUT
 
 
