@@ -3,7 +3,6 @@ import os
 import re
 import tempfile
 import time
-from datetime import datetime
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
@@ -47,22 +46,24 @@ def clean_markdown_for_streaming(text: str) -> str:
 
 
 # Conversation states
-AWAITING_INPUT, AWAITING_ABOUT, AWAITING_PHOTO, AWAITING_BANNER, AWAITING_URL, AWAITING_EXPERIENCE, AWAITING_EDUCATION, AWAITING_OTW, AWAITING_SKILLS_COUNT, AWAITING_CONNECTIONS, AWAITING_POSTING, AWAITING_SKILLS, AWAITING_PASSWORD = range(13)
+AWAITING_INPUT, AWAITING_ABOUT, AWAITING_PHOTO, AWAITING_BANNER, AWAITING_URL, AWAITING_EXPERIENCE, AWAITING_EDUCATION, AWAITING_OTW, AWAITING_SKILLS_COUNT, AWAITING_CONNECTIONS, AWAITING_POSTING, AWAITING_SKILLS, AWAITING_MEMBERSHIP = range(13)
 
 MAX_USES = 3
+CHANNEL_USERNAME = "@itpark_uz"
 
 
-def get_daily_password() -> str:
-    """Password rotates daily: {WeekdayName}1977"""
-    return datetime.now().strftime("%A") + "1977"
+async def _is_channel_member(bot, user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        return member.status in ("member", "creator", "administrator")
+    except Exception:
+        return False
 
 
 def _clear_flow_data(user_data: dict) -> None:
-    """Clear per-assessment keys while preserving access-control state."""
-    approved = user_data.get("approved", False)
+    """Clear per-assessment keys while preserving the use counter."""
     ai_uses = user_data.get("ai_uses", 0)
     user_data.clear()
-    user_data["approved"] = approved
     user_data["ai_uses"] = ai_uses
     user_data["lang"] = "en"
 
@@ -87,26 +88,36 @@ def _welcome_text(ai_uses: int) -> str:
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
+def _join_prompt() -> tuple:
+    """Returns (text, reply_markup) for the channel-join gate message."""
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("📢 Join @itpark_uz", url="https://t.me/itpark_uz"),
+        InlineKeyboardButton("✅ I've Joined", callback_data="check_membership"),
+    ]])
+    text = (
+        "👋 Welcome!\n\n"
+        "To use this bot you need to be a member of our channel:\n"
+        "👉 @itpark_uz\n\n"
+        "Join the channel, then tap *I've Joined* below."
+    )
+    return text, keyboard
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     target = update.message or (update.callback_query and update.callback_query.message)
     if not target:
         return AWAITING_INPUT
 
-    approved = context.user_data.get("approved", False)
+    user_id = update.effective_user.id
+    if not await _is_channel_member(context.bot, user_id):
+        text, keyboard = _join_prompt()
+        await target.reply_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        return AWAITING_MEMBERSHIP
+
     ai_uses = context.user_data.get("ai_uses", 0)
-
-    if not approved:
-        _clear_flow_data(context.user_data)
-        await target.reply_text(
-            "🔐 *This bot is password protected.*\n\nPlease enter today's access password:",
-            parse_mode="Markdown",
-        )
-        return AWAITING_PASSWORD
-
     if ai_uses >= MAX_USES:
         await target.reply_text(
-            f"⛔ You've used all *{MAX_USES}* of your assessments.\n\n"
-            "Contact us for more access.",
+            f"⛔ You've used all *{MAX_USES}* assessments.\n\nContact us for more access.",
             parse_mode="Markdown",
         )
         return ConversationHandler.END
@@ -116,29 +127,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return AWAITING_INPUT
 
 
-async def password_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    entered = update.message.text.strip()
+async def check_membership_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
 
-    if entered.lower() == get_daily_password().lower():
-        context.user_data["approved"] = True
-        ai_uses = context.user_data.get("ai_uses", 0)
-
-        if ai_uses >= MAX_USES:
-            await update.message.reply_text(
-                f"✅ Password correct — but you've already used all *{MAX_USES}* assessments.\n\n"
-                "Contact us for more access.",
-                parse_mode="Markdown",
-            )
-            return ConversationHandler.END
-
-        await update.message.reply_text(
-            f"✅ *Access granted!*\n\n" + _welcome_text(ai_uses),
+    user_id = update.effective_user.id
+    if not await _is_channel_member(context.bot, user_id):
+        text, keyboard = _join_prompt()
+        await query.edit_message_text(
+            "❌ You're not a member yet.\n\n" + text,
+            reply_markup=keyboard,
             parse_mode="Markdown",
         )
-        return AWAITING_INPUT
-    else:
-        await update.message.reply_text("❌ Incorrect password. Please try again:")
-        return AWAITING_PASSWORD
+        return AWAITING_MEMBERSHIP
+
+    ai_uses = context.user_data.get("ai_uses", 0)
+    if ai_uses >= MAX_USES:
+        await query.edit_message_text(
+            f"⛔ You've used all *{MAX_USES}* assessments.\n\nContact us for more access.",
+            parse_mode="Markdown",
+        )
+        return ConversationHandler.END
+
+    _clear_flow_data(context.user_data)
+    await query.edit_message_text(_welcome_text(ai_uses), parse_mode="Markdown")
+    return AWAITING_INPUT
 
 
 # ── AWAITING_INPUT: two parallel handlers ─────────────────────────────────────
@@ -810,22 +823,22 @@ async def restart_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception:
         pass
 
-    approved = context.user_data.get("approved", False)
-    ai_uses = context.user_data.get("ai_uses", 0)
-
-    if not approved:
-        _clear_flow_data(context.user_data)
+    user_id = update.effective_user.id
+    if not await _is_channel_member(context.bot, user_id):
+        text, keyboard = _join_prompt()
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="🔐 *This bot is password protected.*\n\nPlease enter today's access password:",
+            text=text,
+            reply_markup=keyboard,
             parse_mode="Markdown",
         )
-        return AWAITING_PASSWORD
+        return AWAITING_MEMBERSHIP
 
+    ai_uses = context.user_data.get("ai_uses", 0)
     if ai_uses >= MAX_USES:
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text=f"⛔ You've used all *{MAX_USES}* of your assessments.\n\nContact us for more access.",
+            text=f"⛔ You've used all *{MAX_USES}* assessments.\n\nContact us for more access.",
             parse_mode="Markdown",
         )
         return ConversationHandler.END
@@ -866,8 +879,8 @@ def main() -> None:
             CallbackQueryHandler(restart_callback, pattern=r"^restart$"),
         ],
         states={
-            AWAITING_PASSWORD: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, password_received),
+            AWAITING_MEMBERSHIP: [
+                CallbackQueryHandler(check_membership_callback, pattern=r"^check_membership$"),
             ],
             AWAITING_INPUT: [
                 MessageHandler(filters.Document.ALL, input_pdf_received),
