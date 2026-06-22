@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -534,6 +535,20 @@ async def skills_received(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
     message = await update.message.reply_text("⏳ Analyzing your profile...")
 
+    # Keep the typing indicator alive for the full duration of the LLM call
+    # (Telegram's typing action expires after 5 seconds)
+    stop_typing = asyncio.Event()
+
+    async def _keep_typing():
+        while not stop_typing.is_set():
+            try:
+                await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            except Exception:
+                pass
+            await asyncio.sleep(4)
+
+    typing_task = asyncio.create_task(_keep_typing())
+
     full_text = ""
     last_update_time = time.time()
 
@@ -563,6 +578,13 @@ async def skills_received(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception:
             pass
         return ConversationHandler.END
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
 
     if not full_text.strip():
         try:
