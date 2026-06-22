@@ -3,6 +3,7 @@ import os
 import re
 import tempfile
 import time
+from datetime import datetime
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
@@ -13,6 +14,7 @@ from telegram.ext import (
     ContextTypes,
     ConversationHandler,
     MessageHandler,
+    PicklePersistence,
     filters,
 )
 
@@ -45,20 +47,31 @@ def clean_markdown_for_streaming(text: str) -> str:
 
 
 # Conversation states
-AWAITING_INPUT, AWAITING_ABOUT, AWAITING_PHOTO, AWAITING_BANNER, AWAITING_URL, AWAITING_EXPERIENCE, AWAITING_EDUCATION, AWAITING_OTW, AWAITING_SKILLS_COUNT, AWAITING_CONNECTIONS, AWAITING_POSTING, AWAITING_SKILLS = range(12)
+AWAITING_INPUT, AWAITING_ABOUT, AWAITING_PHOTO, AWAITING_BANNER, AWAITING_URL, AWAITING_EXPERIENCE, AWAITING_EDUCATION, AWAITING_OTW, AWAITING_SKILLS_COUNT, AWAITING_CONNECTIONS, AWAITING_POSTING, AWAITING_SKILLS, AWAITING_PASSWORD = range(13)
+
+MAX_USES = 3
 
 
-# ── Handlers ──────────────────────────────────────────────────────────────────
+def get_daily_password() -> str:
+    """Password rotates daily: {WeekdayName}1977"""
+    return datetime.now().strftime("%A") + "1977"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Welcome and ask for profile input."""
-    context.user_data.clear()
-    context.user_data["lang"] = "en"
-    target = update.message or (update.callback_query and update.callback_query.message)
-    if not target:
-        return AWAITING_INPUT
-    await target.reply_text(
+
+def _clear_flow_data(user_data: dict) -> None:
+    """Clear per-assessment keys while preserving access-control state."""
+    approved = user_data.get("approved", False)
+    ai_uses = user_data.get("ai_uses", 0)
+    user_data.clear()
+    user_data["approved"] = approved
+    user_data["ai_uses"] = ai_uses
+    user_data["lang"] = "en"
+
+
+def _welcome_text(ai_uses: int) -> str:
+    remaining = MAX_USES - ai_uses
+    return (
         "👋 Welcome to the *Connect! LinkedIn Assessment Bot*.\n\n"
+        f"📊 You have *{remaining}* assessment{'s' if remaining != 1 else ''} remaining.\n\n"
         "I'll score your profile against Shavkat Karimov's Connect! Tour framework.\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "💻 *On Desktop (best results):*\n"
@@ -68,10 +81,64 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         "4. Send me that PDF file right here\n\n"
         "📱 *On Mobile:*\n"
         "Just paste your *headline* as a text message — "
-        "I'll guide you from there.",
-        parse_mode="Markdown",
+        "I'll guide you from there."
     )
+
+
+# ── Handlers ──────────────────────────────────────────────────────────────────
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    target = update.message or (update.callback_query and update.callback_query.message)
+    if not target:
+        return AWAITING_INPUT
+
+    approved = context.user_data.get("approved", False)
+    ai_uses = context.user_data.get("ai_uses", 0)
+
+    if not approved:
+        _clear_flow_data(context.user_data)
+        await target.reply_text(
+            "🔐 *This bot is password protected.*\n\nPlease enter today's access password:",
+            parse_mode="Markdown",
+        )
+        return AWAITING_PASSWORD
+
+    if ai_uses >= MAX_USES:
+        await target.reply_text(
+            f"⛔ You've used all *{MAX_USES}* of your assessments.\n\n"
+            "Contact us for more access.",
+            parse_mode="Markdown",
+        )
+        return ConversationHandler.END
+
+    _clear_flow_data(context.user_data)
+    await target.reply_text(_welcome_text(ai_uses), parse_mode="Markdown")
     return AWAITING_INPUT
+
+
+async def password_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    entered = update.message.text.strip()
+
+    if entered.lower() == get_daily_password().lower():
+        context.user_data["approved"] = True
+        ai_uses = context.user_data.get("ai_uses", 0)
+
+        if ai_uses >= MAX_USES:
+            await update.message.reply_text(
+                f"✅ Password correct — but you've already used all *{MAX_USES}* assessments.\n\n"
+                "Contact us for more access.",
+                parse_mode="Markdown",
+            )
+            return ConversationHandler.END
+
+        await update.message.reply_text(
+            f"✅ *Access granted!*\n\n" + _welcome_text(ai_uses),
+            parse_mode="Markdown",
+        )
+        return AWAITING_INPUT
+    else:
+        await update.message.reply_text("❌ Incorrect password. Please try again:")
+        return AWAITING_PASSWORD
 
 
 # ── AWAITING_INPUT: two parallel handlers ─────────────────────────────────────
@@ -485,12 +552,24 @@ async def skills_received(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     await send_report(chat_id, full_text)
 
+    # Count this as a successful AI use (only incremented on success)
+    context.user_data["ai_uses"] = context.user_data.get("ai_uses", 0) + 1
+    remaining = MAX_USES - context.user_data["ai_uses"]
+
     keyboard = [[InlineKeyboardButton("🔁 Reassess", callback_data="restart")]]
-    await context.bot.send_message(
-        chat_id,
-        "Want to reassess later? Just send /start again.",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    if remaining > 0:
+        await context.bot.send_message(
+            chat_id,
+            f"📊 You have *{remaining}* assessment{'s' if remaining != 1 else ''} remaining. Send /start to reassess.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+    else:
+        await context.bot.send_message(
+            chat_id,
+            f"⛔ You've used all *{MAX_USES}* of your assessments. Contact us for more access.",
+            parse_mode="Markdown",
+        )
     return ConversationHandler.END
 
 
@@ -516,22 +595,9 @@ async def _doc_in_about_path(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def back_to_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        "👋 Welcome to the *Connect! LinkedIn Assessment Bot*.\n\n"
-        "I'll score your profile against Shavkat Karimov's Connect! Tour framework.\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "💻 *On Desktop (best results):*\n"
-        "1. Open your LinkedIn profile\n"
-        "2. Click the *•••* button (next to \"Enhance profile\")\n"
-        "3. Click *Save to PDF*\n"
-        "4. Send me that PDF file right here\n\n"
-        "📱 *On Mobile:*\n"
-        "Just paste your *headline* as a text message — "
-        "I'll guide you from there.",
-        parse_mode="Markdown",
-    )
-    context.user_data.clear()
-    context.user_data["lang"] = "en"
+    ai_uses = context.user_data.get("ai_uses", 0)
+    _clear_flow_data(context.user_data)
+    await query.edit_message_text(_welcome_text(ai_uses), parse_mode="Markdown")
     return AWAITING_INPUT
 
 
@@ -546,23 +612,13 @@ async def back_to_previous(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         except Exception:
             pass
         if "pdf_text" in context.user_data:
+            ai_uses = context.user_data.get("ai_uses", 0)
+            _clear_flow_data(context.user_data)
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text="👋 Welcome to the *Connect! LinkedIn Assessment Bot*.\n\n"
-                "I'll score your profile against Shavkat Karimov's Connect! Tour framework.\n\n"
-                "━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "💻 *On Desktop (best results):*\n"
-                "1. Open your LinkedIn profile\n"
-                "2. Click the *•••* button (next to \"Enhance profile\")\n"
-                "3. Click *Save to PDF*\n"
-                "4. Send me that PDF file right here\n\n"
-                "📱 *On Mobile:*\n"
-                "Just paste your *headline* as a text message — "
-                "I'll guide you from there.",
+                text=_welcome_text(ai_uses),
                 parse_mode="Markdown",
             )
-            context.user_data.clear()
-            context.user_data["lang"] = "en"
             return AWAITING_INPUT
         else:
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Go Back", callback_data="back_about")]])
@@ -753,21 +809,31 @@ async def restart_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.answer()
     except Exception:
         pass
-    context.user_data.clear()
-    context.user_data["lang"] = "en"
+
+    approved = context.user_data.get("approved", False)
+    ai_uses = context.user_data.get("ai_uses", 0)
+
+    if not approved:
+        _clear_flow_data(context.user_data)
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="🔐 *This bot is password protected.*\n\nPlease enter today's access password:",
+            parse_mode="Markdown",
+        )
+        return AWAITING_PASSWORD
+
+    if ai_uses >= MAX_USES:
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"⛔ You've used all *{MAX_USES}* of your assessments.\n\nContact us for more access.",
+            parse_mode="Markdown",
+        )
+        return ConversationHandler.END
+
+    _clear_flow_data(context.user_data)
     await context.bot.send_message(
         chat_id=query.message.chat_id,
-        text="👋 Welcome to the *Connect! LinkedIn Assessment Bot*.\n\n"
-             "I'll score your profile against Shavkat Karimov's Connect! Tour framework.\n\n"
-             "━━━━━━━━━━━━━━━━━━━━━\n\n"
-             "💻 *On Desktop (best results):*\n"
-             "1. Open your LinkedIn profile\n"
-             "2. Click the *•••* button (next to \"Enhance profile\")\n"
-             "3. Click *Save to PDF*\n"
-             "4. Send me that PDF file right here\n\n"
-             "📱 *On Mobile:*\n"
-             "Just paste your *headline* as a text message — "
-             "I'll guide you from there.",
+        text=_welcome_text(ai_uses),
         parse_mode="Markdown",
     )
     return AWAITING_INPUT
@@ -789,7 +855,10 @@ def main() -> None:
         logger.error("Another bot instance is already running. Exiting.")
         sys.exit(1)
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    persistence = PicklePersistence(
+        filepath=os.path.join(os.path.dirname(__file__), "bot_persistence.pkl")
+    )
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).persistence(persistence).build()
 
     conv = ConversationHandler(
         entry_points=[
@@ -797,6 +866,9 @@ def main() -> None:
             CallbackQueryHandler(restart_callback, pattern=r"^restart$"),
         ],
         states={
+            AWAITING_PASSWORD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, password_received),
+            ],
             AWAITING_INPUT: [
                 MessageHandler(filters.Document.ALL, input_pdf_received),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, input_text_received),
