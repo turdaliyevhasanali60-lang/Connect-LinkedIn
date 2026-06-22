@@ -49,7 +49,7 @@ def clean_markdown_for_streaming(text: str) -> str:
 AWAITING_INPUT, AWAITING_ABOUT, AWAITING_PHOTO, AWAITING_BANNER, AWAITING_URL, AWAITING_EXPERIENCE, AWAITING_EDUCATION, AWAITING_OTW, AWAITING_SKILLS_COUNT, AWAITING_CONNECTIONS, AWAITING_POSTING, AWAITING_SKILLS, AWAITING_MEMBERSHIP = range(13)
 
 MAX_USES = 3
-CHANNEL_USERNAME = "@itpark_uz"
+CHANNEL_USERNAME = "@itcommunityuzb"
 
 
 async def _is_channel_member(bot, user_id: int) -> bool:
@@ -132,13 +132,13 @@ async def _send_otw_question(bot, chat_id: int) -> None:
 def _join_prompt() -> tuple:
     """Returns (text, reply_markup) for the channel-join gate message."""
     keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("📢 Join @itpark_uz", url="https://t.me/itpark_uz"),
+        InlineKeyboardButton("📢 Join @itcommunityuzb", url="https://t.me/itcommunityuzb"),
         InlineKeyboardButton("✅ I've Joined", callback_data="check_membership"),
     ]])
     text = (
         "👋 Welcome!\n\n"
         "To use this bot you need to be a member of our channel:\n"
-        "👉 @itpark_uz\n\n"
+        "👉 @itcommunityuzb\n\n"
         "Join the channel, then tap *I've Joined* below."
     )
     return text, keyboard
