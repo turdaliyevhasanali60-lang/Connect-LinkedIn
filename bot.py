@@ -467,7 +467,11 @@ async def skills_count_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["skills_count"] = query.data.split("_", 1)[1]
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("500+ connections", callback_data="btn_500_plus")],
+        [InlineKeyboardButton("🏆 Over 50k connections", callback_data="btn_over_50k")],
+        [InlineKeyboardButton("Over 10k connections", callback_data="btn_over_10k")],
+        [InlineKeyboardButton("Over 5k connections", callback_data="btn_over_5k")],
+        [InlineKeyboardButton("1k–5k connections", callback_data="btn_1k_5k")],
+        [InlineKeyboardButton("500–1k connections", callback_data="btn_500_1k")],
         [InlineKeyboardButton("100–500 connections", callback_data="btn_100_500")],
         [InlineKeyboardButton("Under 100 connections", callback_data="btn_under_100")],
         [InlineKeyboardButton("0–10 connections", callback_data="btn_0_10")],
@@ -807,7 +811,11 @@ async def back_to_previous(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     elif cb_data == "back_posting":
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("500+ connections", callback_data="btn_500_plus")],
+            [InlineKeyboardButton("🏆 Over 50k connections", callback_data="btn_over_50k")],
+            [InlineKeyboardButton("Over 10k connections", callback_data="btn_over_10k")],
+            [InlineKeyboardButton("Over 5k connections", callback_data="btn_over_5k")],
+            [InlineKeyboardButton("1k–5k connections", callback_data="btn_1k_5k")],
+            [InlineKeyboardButton("500–1k connections", callback_data="btn_500_1k")],
             [InlineKeyboardButton("100–500 connections", callback_data="btn_100_500")],
             [InlineKeyboardButton("Under 100 connections", callback_data="btn_under_100")],
             [InlineKeyboardButton("0–10 connections", callback_data="btn_0_10")],

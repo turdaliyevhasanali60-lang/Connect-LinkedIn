@@ -51,7 +51,17 @@ SKILLS_COUNT_SCORES = {
     "none": (0, "No skills listed on profile"),
 }
 
-P2_SCORES = {"0_10": (1, "0–10 connections"), "under_100": (3, "Under 100 connections"), "100_500": (8, "100–500 connections"), "500_plus": (15, "500+ connections")}
+P2_SCORES = {
+    "0_10": (1, "0–10 connections"),
+    "under_100": (3, "Under 100 connections"),
+    "100_500": (5, "100–500 connections"),
+    "500_1k": (7, "500–1k connections"),
+    "1k_5k": (9, "1k–5k connections"),
+    "over_5k": (11, "Over 5k connections"),
+    "over_10k": (13, "Over 10k connections"),
+    "over_50k": (15, "Over 50k connections"),
+    "500_plus": (7, "500+ connections"),  # For backwards compatibility
+}
 P3_SCORES = {"never": (0, "Never posted on LinkedIn"), "over_month": (2, "Posted over a month ago"), "this_month": (6, "Posted this month"), "this_week": (10, "Posted this week")}
 
 
